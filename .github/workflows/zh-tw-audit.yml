@@ -1,0 +1,110 @@
+name: zh-TW payload audit
+
+on:
+  push:
+    branches: [zh-tw]
+    paths:
+      - "tools/zh_tw_payload_tool.py"
+      - "tools/zh_tw_glossary.json"
+      - "tests/test_zh_tw_payload_tool.py"
+      - "patches/zone/chinese/**"
+      - "locales/zh-TW/**"
+      - "requirements-zh-tw.txt"
+      - ".github/workflows/zh-tw-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install zh-TW conversion dependency
+        run: python -m pip install -r requirements-zh-tw.txt
+
+      - name: Run unit tests
+        run: python -m unittest tests/test_zh_tw_payload_tool.py -v
+
+      - name: Scan all legacy payloads
+        run: |
+          mkdir -p work
+          python tools/zh_tw_payload_tool.py scan patches/zone/chinese \
+            --out work/zh_tw_manifest.json \
+            --glossary tools/zh_tw_glossary.json \
+            --auto | tee work/scan.txt
+
+      - name: Generate glyph inventory
+        run: |
+          python tools/zh_tw_payload_tool.py glyphs work/zh_tw_manifest.json \
+            --localization locales/zh-TW/localization.tw \
+            --out work/required_zh_tw_glyphs.txt
+
+      - name: Generate audit summary
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          m = json.loads(Path("work/zh_tw_manifest.json").read_text(encoding="utf-8"))
+          entries = m["entries"]
+          c = Counter(e["status"] for e in entries)
+          files = sorted({e["file"] for e in entries})
+          glyphs = Path("work/required_zh_tw_glyphs.txt").read_text(encoding="utf-8").strip()
+
+          mismatch = [e for e in entries if e["status"] == "length_mismatch"]
+          unenc = [e for e in entries if e["status"] == "unencodable_gbk"]
+
+          lines = [
+              "# COD4 zh-TW payload audit",
+              "",
+              f"- scanned text entries: {len(entries)}",
+              f"- files containing detected CJK text: {len(files)}",
+              f"- candidate_safe: {c.get('candidate_safe', 0)}",
+              f"- length_mismatch: {c.get('length_mismatch', 0)}",
+              f"- unencodable_gbk: {c.get('unencodable_gbk', 0)}",
+              f"- required CJK glyphs: {len(glyphs)}",
+              "",
+              "## Length mismatches",
+          ]
+          for e in mismatch[:100]:
+              lines.append(
+                  f"- `{e['file']}` [{e['start']}:{e['end']}]: "
+                  f"`{e['original']}` → `{e['zh_tw']}` "
+                  f"({e['original_len']} → {e['candidate_len']} bytes)"
+              )
+          if len(mismatch) > 100:
+              lines.append(f"- ... and {len(mismatch)-100} more")
+
+          lines += ["", "## GBK-unencodable candidates"]
+          for e in unenc[:100]:
+              lines.append(
+                  f"- `{e['file']}` [{e['start']}:{e['end']}]: "
+                  f"`{e['original']}` → `{e['zh_tw']}`"
+              )
+          if len(unenc) > 100:
+              lines.append(f"- ... and {len(unenc)-100} more")
+
+          Path("work/audit-summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print("\n".join(lines[:12]))
+          PY
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zh-tw-payload-audit
+          path: |
+            work/zh_tw_manifest.json
+            work/required_zh_tw_glyphs.txt
+            work/audit-summary.md
+            work/scan.txt
+          if-no-files-found: error
