@@ -72,6 +72,121 @@ jobs:
             --localization locales/zh-TW/localization.tw \
             --out work/required_zh_tw_glyphs.txt
 
+
+
+      - name: Download pinned OpenAssetTools
+        run: |
+          curl -L --fail --retry 3 \
+            -o work/oat-linux.tar.gz \
+            https://github.com/Laupetin/OpenAssetTools/releases/download/v0.33.0/oat-linux.tar.gz
+          echo "aa0b80f633c50d656b26d28b4899fd76bd994024ff0c669303ed5db52cc9e864  work/oat-linux.tar.gz" | sha256sum -c -
+          mkdir -p work/oat
+          tar -xzf work/oat-linux.tar.gz -C work/oat
+          find work/oat -maxdepth 3 -type f -iname 'Unlinker*' -print
+
+      - name: Dump COD4 font assets from patched code_post_gfx
+        run: |
+          mkdir -p work/font-dump
+          UNLINKER="$(find "$GITHUB_WORKSPACE/work/oat" -type f -name 'Unlinker' -o -name 'Unlinker.exe' | head -n 1)"
+          if [ -z "$UNLINKER" ]; then
+            echo "Unlinker binary not found"
+            exit 1
+          fi
+          chmod +x "$UNLINKER"
+          cd work/font-dump
+          "$UNLINKER" --verbose \
+            --search-path "$GITHUB_WORKSPACE/patches/main" \
+            "$GITHUB_WORKSPACE/patches/zone/code_post_gfx.ff" \
+            | tee "$GITHUB_WORKSPACE/work/font-unlinker.log"
+          find . -type f | sort > "$GITHUB_WORKSPACE/work/font-dump-files.txt"
+
+      - name: Audit Traditional Chinese glyph coverage
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          required_text = Path("work/required_zh_tw_glyphs.txt").read_text(encoding="utf-8").strip()
+          required = {}
+          for ch in required_text:
+              raw = ch.encode("gbk")
+              if len(raw) == 1:
+                  code = raw[0]
+              elif len(raw) == 2:
+                  code = (raw[0] << 8) | raw[1]
+              else:
+                  raise SystemExit(f"unexpected GBK width for {ch!r}: {raw.hex()}")
+              required[code] = ch
+
+          font_files = []
+          for path in Path("work/font-dump").rglob("*.json"):
+              try:
+                  obj = json.loads(path.read_text(encoding="utf-8"))
+              except Exception:
+                  continue
+              if obj.get("_type") != "font":
+                  continue
+
+              font = obj.get("font")
+              if not isinstance(font, dict):
+                  continue
+              glyphs = font.get("glyphs")
+              if not isinstance(glyphs, list):
+                  continue
+
+              letters = {
+                  int(g["letter"])
+                  for g in glyphs
+                  if isinstance(g, dict) and "letter" in g
+              }
+              covered = set(required).intersection(letters)
+              missing = set(required).difference(letters)
+              chinese_like = sum(1 for x in letters if x > 0xFF)
+              font_files.append({
+                  "path": path.as_posix(),
+                  "glyph_count": len(letters),
+                  "double_byte_glyphs": chinese_like,
+                  "covered": len(covered),
+                  "missing": len(missing),
+                  "missing_chars": "".join(required[x] for x in sorted(missing)),
+              })
+
+          if not font_files:
+              print("No font JSON assets were dumped.")
+              print(Path("work/font-dump-files.txt").read_text(encoding="utf-8", errors="replace"))
+              raise SystemExit(1)
+
+          font_files.sort(key=lambda x: (-x["covered"], x["missing"], x["path"]))
+          best = font_files[0]
+          Path("work/font-coverage.json").write_text(
+              json.dumps(font_files, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          lines = [
+              "# COD4 zh-TW font coverage audit",
+              "",
+              f"- required zh-TW glyphs: {len(required)}",
+              f"- dumped font assets: {len(font_files)}",
+              f"- best font: \`{best['path']}\`",
+              f"- best font glyph count: {best['glyph_count']}",
+              f"- best font double-byte glyphs: {best['double_byte_glyphs']}",
+              f"- covered required glyphs: {best['covered']}",
+              f"- missing required glyphs: {best['missing']}",
+              "",
+              "## Fonts",
+          ]
+          for f in font_files:
+              lines.append(
+                  f"- \`{f['path']}\`: glyphs={f['glyph_count']}, "
+                  f"double-byte={f['double_byte_glyphs']}, "
+                  f"covered={f['covered']}, missing={f['missing']}"
+              )
+          lines += ["", "## Missing glyphs in best font", "", best["missing_chars"] or "(none)"]
+          Path("work/font-coverage.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print("\n".join(lines[:12]))
+          PY
+
       - name: Generate audit summary
         run: |
           python - <<'PY'
@@ -131,4 +246,8 @@ jobs:
             work/required_zh_tw_glyphs.txt
             work/audit-summary.md
             work/scan.txt
+            work/font-coverage.json
+            work/font-coverage.md
+            work/font-unlinker.log
+            work/font-dump-files.txt
           if-no-files-found: error
