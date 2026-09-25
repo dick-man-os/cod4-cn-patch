@@ -64,7 +64,7 @@ jobs:
         run: |
           mkdir -p work/font_dump
           "$UNLINKER" \
-            --include-assets Font_s \
+            --include-assets font \
             --output-folder work/font_dump \
             patches/zone/code_post_gfx.ff
 
@@ -72,7 +72,9 @@ jobs:
         run: find work/font_dump -type f -printf '%p\n' | sort | tee work/font-files.txt
 
       - name: Audit zh-TW glyph coverage
+        shell: bash
         run: |
+          set -o pipefail
           python tools/zh_tw_font_audit.py \
             --fonts work/font_dump \
             --required work/required_zh_tw_glyphs.txt \
