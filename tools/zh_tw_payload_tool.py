@@ -335,6 +335,20 @@ def command_build(args) -> int:
     return 0
 
 
+def requires_multibyte_gbk_glyph(ch: str) -> bool:
+    """Return True when COD4's Chinese path must resolve a two-byte GBK glyph.
+
+    This intentionally includes CJK punctuation and symbols, not only Han
+    ideographs.  ASCII/control characters are handled by the engine's built-in
+    single-byte glyph range and are excluded here.
+    """
+    try:
+        raw = ch.encode("gbk", errors="strict")
+    except UnicodeEncodeError:
+        return False
+    return len(raw) == 2
+
+
 def command_glyphs(args) -> int:
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     chars: set[str] = set()
@@ -345,11 +359,11 @@ def command_glyphs(args) -> int:
             continue
         if args.approved_only and not entry.get("approved"):
             continue
-        chars.update(ch for ch in text if CJK_RE.match(ch))
+        chars.update(ch for ch in text if requires_multibyte_gbk_glyph(ch))
 
     if args.localization and args.localization.exists():
         text = args.localization.read_text(encoding="utf-8")
-        chars.update(ch for ch in text if CJK_RE.match(ch))
+        chars.update(ch for ch in text if requires_multibyte_gbk_glyph(ch))
 
     ordered = "".join(sorted(chars))
     args.out.parent.mkdir(parents=True, exist_ok=True)

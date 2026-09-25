@@ -46,6 +46,13 @@ class PayloadToolTests(unittest.TestCase):
         glossary = mod.load_glossary(None)
         self.assertNotIn("内存", glossary)
 
+    def test_glyph_inventory_includes_cjk_punctuation(self):
+        self.assertTrue(mod.requires_multibyte_gbk_glyph("遊"))
+        self.assertTrue(mod.requires_multibyte_gbk_glyph("《"))
+        self.assertTrue(mod.requires_multibyte_gbk_glyph("："))
+        self.assertFalse(mod.requires_multibyte_gbk_glyph("A"))
+        self.assertFalse(mod.requires_multibyte_gbk_glyph("\n"))
+
     def test_manifest_marks_length_mismatch(self):
         raw = "游戏".encode("gbk")
         span = mod.Span(10, 14, "游戏", raw)
