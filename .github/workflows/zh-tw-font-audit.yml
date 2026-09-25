@@ -6,6 +6,10 @@ on:
     paths:
       - "tools/zh_tw_font_audit.py"
       - "tests/test_zh_tw_font_audit.py"
+      - "tools/zh_tw_payload_tool.py"
+      - "tools/zh_tw_glossary.json"
+      - "locales/zh-TW/**"
+      - "requirements-zh-tw.txt"
       - "patches/main/localized_chinese_iw15.iwd"
       - "patches/zone/code_post_gfx.ff"
       - ".github/workflows/zh-tw-font-audit.yml"
