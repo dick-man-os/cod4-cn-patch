@@ -92,4 +92,6 @@ jobs:
             work/font-audit.txt
             work/font-files.txt
             work/required_zh_tw_glyphs.txt
+            work/font_dump/fonts/*.json
+            work/font_dump/zone_source/code_post_gfx.zone
           if-no-files-found: error
