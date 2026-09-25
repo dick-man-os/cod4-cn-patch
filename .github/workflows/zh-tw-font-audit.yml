@@ -1,0 +1,93 @@
+name: zh-TW font coverage audit
+
+on:
+  push:
+    branches: [zh-tw]
+    paths:
+      - "tools/zh_tw_font_audit.py"
+      - "tests/test_zh_tw_font_audit.py"
+      - "patches/main/localized_chinese_iw15.iwd"
+      - "patches/zone/code_post_gfx.ff"
+      - ".github/workflows/zh-tw-font-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  font-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run font audit unit tests
+        run: python -m unittest tests/test_zh_tw_font_audit.py -v
+
+      - name: Rebuild current required glyph inventory
+        run: |
+          python -m pip install -r requirements-zh-tw.txt
+          mkdir -p work
+          python tools/zh_tw_payload_tool.py scan patches/zone/chinese \
+            --out work/zh_tw_manifest.json \
+            --glossary tools/zh_tw_glossary.json \
+            --opencc-config s2tw \
+            --auto
+          python tools/zh_tw_payload_tool.py glyphs work/zh_tw_manifest.json \
+            --localization locales/zh-TW/localization.tw \
+            --out work/required_zh_tw_glyphs.txt
+
+      - name: Download OpenAssetTools v0.33.0
+        run: |
+          curl -L --fail --retry 3 \
+            -o work/oat-linux.tar.gz \
+            https://github.com/Laupetin/OpenAssetTools/releases/download/v0.33.0/oat-linux.tar.gz
+          echo "aa0b80f633c50d656b26d28b4899fd76bd994024ff0c669303ed5db52cc9e864  work/oat-linux.tar.gz" | sha256sum -c -
+          mkdir -p work/oat
+          tar -xzf work/oat-linux.tar.gz -C work/oat
+          find work/oat -maxdepth 2 -type f -printf '%p\n' | sort
+
+      - name: Locate Unlinker
+        run: |
+          UNLINKER="$(find work/oat -type f -name Unlinker -o -name Unlinker.exe | head -n 1)"
+          test -n "$UNLINKER"
+          chmod +x "$UNLINKER"
+          echo "UNLINKER=$UNLINKER" >> "$GITHUB_ENV"
+          "$UNLINKER" --version || true
+
+      - name: Dump IW3 Font_s assets
+        run: |
+          mkdir -p work/font_dump
+          "$UNLINKER" \
+            --include-assets Font_s \
+            --output-folder work/font_dump \
+            patches/zone/code_post_gfx.ff
+
+      - name: List dumped font assets
+        run: find work/font_dump -type f -printf '%p\n' | sort | tee work/font-files.txt
+
+      - name: Audit zh-TW glyph coverage
+        run: |
+          python tools/zh_tw_font_audit.py \
+            --fonts work/font_dump \
+            --required work/required_zh_tw_glyphs.txt \
+            --iwd patches/main/localized_chinese_iw15.iwd \
+            --json-out work/font-audit.json \
+            --md-out work/font-audit.md | tee work/font-audit.txt
+
+      - name: Upload font audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zh-tw-font-audit
+          path: |
+            work/font-audit.json
+            work/font-audit.md
+            work/font-audit.txt
+            work/font-files.txt
+            work/required_zh_tw_glyphs.txt
+          if-no-files-found: error
