@@ -40,7 +40,28 @@ jobs:
           python tools/zh_tw_payload_tool.py scan patches/zone/chinese \
             --out work/zh_tw_manifest.json \
             --glossary tools/zh_tw_glossary.json \
+            --opencc-config s2tw \
             --auto | tee work/scan.txt
+
+      - name: Reject known semantic conversion hazards
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path("work/zh_tw_manifest.json").read_text(encoding="utf-8"))
+          forbidden = ("計程車兵", "最最佳化", "重重新整理")
+          bad = []
+          for entry in manifest["entries"]:
+              text = entry.get("zh_tw") or ""
+              for needle in forbidden:
+                  if needle in text:
+                      bad.append((entry["id"], needle, text))
+          if bad:
+              for item in bad:
+                  print("semantic hazard:", item)
+              raise SystemExit(1)
+          print("semantic hazard check: clean")
+          PY
 
       - name: Generate glyph inventory
         run: |

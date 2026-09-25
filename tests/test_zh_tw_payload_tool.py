@@ -35,12 +35,16 @@ class PayloadToolTests(unittest.TestCase):
         spans = mod.scan_gbk_spans(data)
         self.assertEqual([s.text for s in spans], ["游戏设置", "战争"])
 
-    def test_s2twp_candidate_keeps_length_for_common_terms(self):
+    def test_taiwan_candidate_keeps_length_for_common_terms(self):
         glossary = mod.load_glossary(None)
         original = "游戏设置"
         converted = mod.to_zh_tw(original, glossary, FakeOpenCC())
         self.assertEqual(converted, "遊戲設定")
         self.assertEqual(len(original.encode("gbk")), len(converted.encode("gbk")))
+
+    def test_fixed_offset_glossary_does_not_expand_memory_term(self):
+        glossary = mod.load_glossary(None)
+        self.assertNotIn("内存", glossary)
 
     def test_manifest_marks_length_mismatch(self):
         raw = "游戏".encode("gbk")

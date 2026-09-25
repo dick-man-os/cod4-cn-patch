@@ -5,7 +5,7 @@ COD4 zh-TW payload preparation tool.
 Phase-1 goals:
 - scan legacy GBK/CP936 .bin payloads without modifying originals
 - isolate Chinese text spans conservatively
-- optionally generate Taiwan Traditional Chinese candidates with OpenCC s2twp
+- optionally generate Taiwan Traditional Chinese candidates with OpenCC s2tw
 - enforce GBK encodability and exact byte-length safety for fixed-offset payloads
 - build only explicitly approved replacements
 - generate required CJK glyph inventory for the later font phase
@@ -49,8 +49,15 @@ DEFAULT_GLOSSARY = {
     "选项": "選項",
     "声音": "音效",
     "字幕": "字幕",
-    "内存": "記憶體",
     "硬盘": "硬碟",
+    "刷新": "更新",
+    "服务器": "伺服器",
+    "显卡": "顯卡",
+    "驱动": "驅動",
+    "运行": "執行",
+    "程序": "程式",
+    "硬件": "硬體",
+    "卸载": "移除",
     "错误": "錯誤",
     "退出": "離開",
 }
@@ -123,7 +130,7 @@ def apply_glossary(text: str, glossary: dict[str, str]) -> str:
     return text
 
 
-def get_opencc():
+def get_opencc(config: str = "s2tw"):
     try:
         from opencc import OpenCC  # type: ignore
     except ImportError as exc:
@@ -131,12 +138,12 @@ def get_opencc():
             "OpenCC is required for automatic conversion. "
             "Install with: pip install opencc-python-reimplemented"
         ) from exc
-    return OpenCC("s2twp")
+    return OpenCC(config)
 
 
-def to_zh_tw(text: str, glossary: dict[str, str], opencc=None) -> str:
+def to_zh_tw(text: str, glossary: dict[str, str], opencc=None, opencc_config: str = "s2tw") -> str:
     if opencc is None:
-        opencc = get_opencc()
+        opencc = get_opencc(opencc_config)
     converted = opencc.convert(text)
     return apply_glossary(converted, glossary)
 
@@ -200,7 +207,7 @@ def iter_bin_files(source: Path) -> Iterable[Path]:
 def command_scan(args) -> int:
     source = args.source.resolve()
     glossary = load_glossary(args.glossary)
-    opencc = get_opencc() if args.auto else None
+    opencc = get_opencc(args.opencc_config) if args.auto else None
     entries: list[dict] = []
 
     for path in iter_bin_files(source):
@@ -215,6 +222,7 @@ def command_scan(args) -> int:
         "encoding": "gbk",
         "source": str(source),
         "auto_generated_with_opencc": bool(args.auto),
+        "opencc_config": args.opencc_config if args.auto else None,
         "entries": entries,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -238,7 +246,7 @@ def command_scan(args) -> int:
 def command_refresh(args) -> int:
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     glossary = load_glossary(args.glossary)
-    opencc = get_opencc()
+    opencc = get_opencc(args.opencc_config)
 
     for entry in manifest["entries"]:
         candidate = to_zh_tw(entry["original"], glossary, opencc)
@@ -353,7 +361,7 @@ def command_glyphs(args) -> int:
 
 def command_convert_localization(args) -> int:
     glossary = load_glossary(args.glossary)
-    opencc = get_opencc()
+    opencc = get_opencc(args.opencc_config)
     text = args.source.read_text(encoding=args.input_encoding)
     converted = to_zh_tw(text, glossary, opencc)
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -370,12 +378,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("source", type=Path, help="directory containing .bin payloads")
     s.add_argument("--out", type=Path, required=True)
     s.add_argument("--glossary", type=Path)
-    s.add_argument("--auto", action="store_true", help="generate OpenCC s2twp candidates")
+    s.add_argument("--auto", action="store_true", help="generate OpenCC Taiwan Traditional candidates")
+    s.add_argument("--opencc-config", default="s2tw", choices=("s2tw", "s2twp"))
     s.set_defaults(func=command_scan)
 
     r = sub.add_parser("refresh", help="refresh zh-TW candidates in an existing manifest")
     r.add_argument("manifest", type=Path)
     r.add_argument("--glossary", type=Path)
+    r.add_argument("--opencc-config", default="s2tw", choices=("s2tw", "s2twp"))
     r.set_defaults(func=command_refresh)
 
     b = sub.add_parser("build", help="build approved exact-length payload replacements")
@@ -397,6 +407,7 @@ def build_parser() -> argparse.ArgumentParser:
     l.add_argument("--out", type=Path, required=True)
     l.add_argument("--glossary", type=Path)
     l.add_argument("--input-encoding", default="utf-8")
+    l.add_argument("--opencc-config", default="s2tw", choices=("s2tw", "s2twp"))
     l.set_defaults(func=command_convert_localization)
 
     return p

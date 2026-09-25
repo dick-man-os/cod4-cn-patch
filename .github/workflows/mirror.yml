@@ -1,9 +1,9 @@
 name: Mirror to Codeberg
 
+# Disabled for normal pushes in this fork. The upstream workflow requires
+# the upstream author's CODEBERG_TOKEN and otherwise produces unrelated
+# failures on zh-tw development commits.
 on:
-  push:
-    branches: ["**"]
-    tags: ["**"]
   workflow_dispatch:
 
 permissions:
