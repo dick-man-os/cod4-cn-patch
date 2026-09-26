@@ -93,12 +93,20 @@ def audit_fonts(font_root: Path, required_chars: list[str]) -> dict:
     fonts = []
 
     for path, obj in find_font_objects(font_root):
-        letters = {
-            int(g["letter"])
-            for g in obj.get("glyphs", [])
+        numeric_glyphs = [
+            g for g in obj.get("glyphs", [])
             if isinstance(g, dict) and isinstance(g.get("letter"), int)
+        ]
+        letters = {int(g["letter"]) for g in numeric_glyphs}
+        drawable = {
+            int(g["letter"]) for g in numeric_glyphs
+            if g.get("pixelWidth", 0) > 0
+            and g.get("pixelHeight", 0) > 0
+            and g.get("s1", 0) > g.get("s0", 0)
+            and g.get("t1", 0) > g.get("t0", 0)
         }
-        missing_codes = sorted(set(required) - letters)
+        missing_codes = sorted(set(required) - drawable)
+        unusable_codes = sorted(set(required).intersection(letters - drawable))
         missing_chars = "".join(required[x] for x in missing_codes)
         name = font_name_from_path(path)
         fonts.append({
@@ -108,9 +116,11 @@ def audit_fonts(font_root: Path, required_chars: list[str]) -> dict:
             "glyph_count_declared": len(obj.get("glyphs", [])),
             "glyph_count_unique": len(letters),
             "required_count": len(required),
+            "covered_count": len(required) - len(missing_codes),
             "missing_count": len(missing_codes),
             "missing_chars": missing_chars,
             "missing_codes": [f"0x{x:04X}" for x in missing_codes],
+            "unusable_count": len(unusable_codes),
             "core_font": name in CORE_FONT_NAMES,
         })
 
@@ -172,19 +182,20 @@ def write_markdown(result: dict, iwd: dict | None, path: Path) -> None:
         "",
         "## Font coverage",
         "",
-        "| Font | Glyphs | Missing | Core |",
-        "|---|---:|---:|:---:|",
+        "| Font | Glyphs | Covered | Missing | Unusable | Core |",
+        "|---|---:|---:|---:|---:|:---:|",
     ]
     for font in result["fonts"]:
         lines.append(
             f"| {font['name']} | {font['glyph_count_unique']} | "
-            f"{font['missing_count']} | {'yes' if font['core_font'] else 'no'} |"
+            f"{font['covered_count']} | {font['missing_count']} | "
+            f"{font['unusable_count']} | {'yes' if font['core_font'] else 'no'} |"
         )
         if font["missing_count"]:
             lines.append("")
             lines.append(
                 f"Missing from **{font['name']}**: "
-                f"\`{font['missing_chars'][:300]}\`"
+                f"`{font['missing_chars'][:300]}`"
             )
             if len(font["missing_chars"]) > 300:
                 lines.append(f"(and {len(font['missing_chars']) - 300} more)")
@@ -194,7 +205,7 @@ def write_markdown(result: dict, iwd: dict | None, path: Path) -> None:
         lines += ["", "## IWD font textures", ""]
         for img in iwd["font_images"]:
             lines.append(
-                f"- \`{img['name']}\`: IWI v{img['version']}, "
+                f"- `{img['name']}`: IWI v{img['version']}, "
                 f"{img['width']}×{img['height']}, format=0x{img['format']:02X}, "
                 f"{img['size']} bytes"
             )
@@ -232,7 +243,8 @@ def main(argv=None) -> int:
     for font in result["fonts"]:
         print(
             f"{font['name']}: glyphs={font['glyph_count_unique']} "
-            f"missing={font['missing_count']} core={font['core_font']}"
+            f"covered={font['covered_count']} missing={font['missing_count']} "
+            f"unusable={font['unusable_count']} core={font['core_font']}"
         )
 
     if result["core_font_count"] == 0:
@@ -243,3 +255,4 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

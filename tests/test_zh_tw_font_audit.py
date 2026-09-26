@@ -25,7 +25,11 @@ class FontAuditTests(unittest.TestCase):
             font_dir = root / "fonts"
             font_dir.mkdir()
             chars = ["遊", "戲"]
-            glyphs = [{"letter": mod.glyph_code_for_char("遊")}]
+            glyphs = [{
+                "letter": mod.glyph_code_for_char("遊"),
+                "pixelWidth": 12, "pixelHeight": 12,
+                "s0": 0.1, "s1": 0.2, "t0": 0.1, "t1": 0.2,
+            }]
             data = {
                 "_type": "font",
                 "_game": "iw3",
@@ -40,8 +44,29 @@ class FontAuditTests(unittest.TestCase):
             result = mod.audit_fonts(root, chars)
             self.assertEqual(result["font_count"], 1)
             self.assertEqual(result["fonts"][0]["missing_count"], 1)
+            self.assertEqual(result["fonts"][0]["covered_count"], 1)
             self.assertEqual(result["fonts"][0]["missing_chars"], "戲")
+
+    def test_glyph_record_without_pixels_does_not_count_as_coverage(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            font_dir = root / "fonts"
+            font_dir.mkdir()
+            data = {
+                "_type": "font", "_game": "iw3",
+                "glyphs": [{
+                    "letter": mod.glyph_code_for_char("遊"),
+                    "pixelWidth": 0, "pixelHeight": 12,
+                    "s0": 0.1, "s1": 0.1, "t0": 0.1, "t1": 0.2,
+                }],
+            }
+            (font_dir / "normalfont.json").write_text(json.dumps(data), encoding="utf-8")
+            font = mod.audit_fonts(root, ["遊"])["fonts"][0]
+            self.assertEqual(font["covered_count"], 0)
+            self.assertEqual(font["missing_chars"], "遊")
+            self.assertEqual(font["unusable_count"], 1)
 
 
 if __name__ == "__main__":
     unittest.main()
+
