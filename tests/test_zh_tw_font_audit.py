@@ -43,6 +43,7 @@ class FontAuditTests(unittest.TestCase):
             )
             result = mod.audit_fonts(root, chars)
             self.assertEqual(result["font_count"], 1)
+            self.assertEqual(result["fonts"][0]["two_byte_glyph_count"], 1)
             self.assertEqual(result["fonts"][0]["missing_count"], 1)
             self.assertEqual(result["fonts"][0]["covered_count"], 1)
             self.assertEqual(result["fonts"][0]["missing_chars"], "戲")

@@ -5,7 +5,7 @@
 ## 實測結果
 
 - 需要的雙位元組 GBK 字形：**1,288**。先前的 1,275 是較早的統計；目前清單也納入全形標點與符號。
-- 共匯出 9 個 IW3 `Font_s` 字型，其中 6 個主要遊戲／介面字型（big、bold、extrabig、normal、objective、small）各有 1,647 個雙位元組字形代碼；每個字型都覆蓋 **790 / 1,288**，缺 **498**。六者缺字集合相同。
+- 共匯出 9 個 IW3 `Font_s` 字型，其中 6 個主要遊戲／介面字型（big、bold、extrabig、normal、objective、small）各有 1,647 個數值字形代碼（包含單位元組 `0x7F`），其中 1,646 個是雙位元組代碼；每個字型都覆蓋 **790 / 1,288**，缺 **498**。六者缺字集合相同。
 - 已覆蓋的 790 個字形都有非零像素寬高及非零 UV 範圍；目前沒有「有代碼但空白」的需求字形。
 - `localized_chinese_iw15.iwd` 有 35 個成員、34 個 IWI 影像。三張字型圖集是 IWI v6、格式 `0x0D`（DXT5）：normal 為 1024×512，small 與 extrabig 各為 1024×1024。
 - `images/gamefonts_pc_normal.iwi` 只儲存圖像；字元代碼、繪圖尺寸及 UV 對應在 `patches/zone/code_post_gfx.ff` 的 `Font_s` 資產中。COD4 中文路徑把 GBK 兩個位元組合成 `(first << 8) | second`，再查字形表。
@@ -31,3 +31,4 @@
 下一個可執行方案：先選定授權清楚、確實含全部核准字形的字型來源；再做固定輸入與版本的圖集排版、字形尺寸／UV 及 GBK 代碼輸出，交由 Linker 載入編好的 `Font_s`，並驗證新圖集與 fastfile 的一致性。最後需在 COD4 單機介面和戰役中實際檢查缺字與排版。對罕見字先人工核對文字來源，避免為掃描雜訊製作字形。
 
 原始 `patches/` 翻譯資料的權利歸屬仍依 [NOTICE](https://github.com/dick-man-os/cod4-cn-patch/blob/zh-tw/NOTICE)，本報告不變更其授權。
+

@@ -115,6 +115,7 @@ def audit_fonts(font_root: Path, required_chars: list[str]) -> dict:
             "pixel_height": obj.get("pixelHeight"),
             "glyph_count_declared": len(obj.get("glyphs", [])),
             "glyph_count_unique": len(letters),
+            "two_byte_glyph_count": sum(code > 0xFF for code in letters),
             "required_count": len(required),
             "covered_count": len(required) - len(missing_codes),
             "missing_count": len(missing_codes),
@@ -182,12 +183,13 @@ def write_markdown(result: dict, iwd: dict | None, path: Path) -> None:
         "",
         "## Font coverage",
         "",
-        "| Font | Glyphs | Covered | Missing | Unusable | Core |",
-        "|---|---:|---:|---:|---:|:---:|",
+        "| Font | Numeric codes | Two-byte codes | Covered | Missing | Unusable | Core |",
+        "|---|---:|---:|---:|---:|---:|:---:|",
     ]
     for font in result["fonts"]:
         lines.append(
             f"| {font['name']} | {font['glyph_count_unique']} | "
+            f"{font['two_byte_glyph_count']} | "
             f"{font['covered_count']} | {font['missing_count']} | "
             f"{font['unusable_count']} | {'yes' if font['core_font'] else 'no'} |"
         )
@@ -243,6 +245,7 @@ def main(argv=None) -> int:
     for font in result["fonts"]:
         print(
             f"{font['name']}: glyphs={font['glyph_count_unique']} "
+            f"two_byte={font['two_byte_glyph_count']} "
             f"covered={font['covered_count']} missing={font['missing_count']} "
             f"unusable={font['unusable_count']} core={font['core_font']}"
         )
