@@ -1,0 +1,10 @@
+Noto Sans CJK TC Regular, version 2.004
+Copyright (c) 2014-2021 Adobe (copyright string in the font name table).
+Source: https://github.com/notofonts/noto-cjk/tree/Sans2.004/Sans/OTF/TraditionalChinese
+Font file: NotoSansCJKtc-Regular.otf
+SHA-256: dce08bd4fd91aa8aa76ed8fea4b694c2dfb8550f67871e326843212ddbeb88b4
+License: SIL Open Font License 1.1; see Noto-CJK-OFL.txt.
+
+Generated COD4 glyph atlases and Font_s assets made from this font are kept
+under the font's OFL terms. The original patches/ translation data retains
+its separate copyright and is covered by the repository NOTICE.

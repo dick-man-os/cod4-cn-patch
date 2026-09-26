@@ -1,0 +1,176 @@
+name: zh-TW font build audit
+
+on:
+  push:
+    branches: [zh-tw]
+    paths:
+      - ".github/workflows/zh-tw-font-build.yml"
+      - "tools/zh_tw_font_builder.py"
+      - "tools/zh_tw_font_pixels_audit.py"
+      - "tools/zh_tw_font_link.py"
+      - "tools/zh_tw_font_audit.py"
+      - "tools/zh_tw_payload_tool.py"
+      - "tools/zh_tw_glossary.json"
+      - "tests/test_zh_tw_font_builder.py"
+      - "licenses/Noto-CJK-OFL.txt"
+      - "licenses/Noto-CJK-NOTICE.txt"
+      - "locales/zh-TW/**"
+      - "patches/zone/chinese/**"
+      - "patches/zone/code_post_gfx.ff"
+      - "patches/main/localized_chinese_iw15.iwd"
+      - "requirements-zh-tw.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout zh-tw
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned Python dependencies
+        run: python -m pip install -r requirements-zh-tw.txt Pillow==12.3.0
+
+      - name: Rebuild required glyph inventory from current payloads
+        run: |
+          mkdir -p work
+          python tools/zh_tw_payload_tool.py scan patches/zone/chinese \
+            --out work/zh_tw_manifest.json \
+            --glossary tools/zh_tw_glossary.json \
+            --opencc-config s2tw \
+            --auto
+          python tools/zh_tw_payload_tool.py glyphs work/zh_tw_manifest.json \
+            --localization locales/zh-TW/localization.tw \
+            --out work/required_zh_tw_glyphs.txt
+
+      - name: Download pinned Noto Sans CJK TC Regular 2.004
+        run: |
+          curl --fail --location --retry 3 \
+            --output work/NotoSansCJKtc-Regular.otf \
+            https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf
+          echo "dce08bd4fd91aa8aa76ed8fea4b694c2dfb8550f67871e326843212ddbeb88b4  work/NotoSansCJKtc-Regular.otf" | sha256sum -c -
+
+      - name: Verify Unicode cmap covers every required GBK character
+        run: |
+          python tools/zh_tw_font_builder.py check \
+            --font work/NotoSansCJKtc-Regular.otf \
+            --required work/required_zh_tw_glyphs.txt
+
+      - name: Download pinned OpenAssetTools v0.33.0
+        run: |
+          curl --fail --location --retry 3 \
+            --output work/oat-linux.tar.gz \
+            https://github.com/Laupetin/OpenAssetTools/releases/download/v0.33.0/oat-linux.tar.gz
+          echo "aa0b80f633c50d656b26d28b4899fd76bd994024ff0c669303ed5db52cc9e864  work/oat-linux.tar.gz" | sha256sum -c -
+          mkdir -p work/oat
+          tar -xzf work/oat-linux.tar.gz -C work/oat
+
+      - name: Locate OAT Linker and Unlinker
+        shell: bash
+        run: |
+          LINKER="$(find work/oat -type f -name Linker | head -n 1)"
+          test -n "$LINKER"
+          OAT_BIN="$(dirname "$LINKER")"
+          test -f "$OAT_BIN/Unlinker"
+          chmod +x "$OAT_BIN/Linker" "$OAT_BIN/Unlinker"
+          echo "OAT_BIN=$OAT_BIN" >> "$GITHUB_ENV"
+
+      - name: Dump existing IW3 font JSON
+        shell: bash
+        run: |
+          mkdir -p work/font_dump
+          "$OAT_BIN/Unlinker" \
+            --include-assets font \
+            --output-folder work/font_dump \
+            patches/zone/code_post_gfx.ff
+
+      - name: Build twice from identical inputs
+        run: |
+          for destination in work/font_build_a work/font_build_b; do
+            python tools/zh_tw_font_builder.py build \
+              --font work/NotoSansCJKtc-Regular.otf \
+              --required work/required_zh_tw_glyphs.txt \
+              --baseline-fonts work/font_dump \
+              --baseline-iwd patches/main/localized_chinese_iw15.iwd \
+              --license-file licenses/Noto-CJK-OFL.txt \
+              --notice-file licenses/Noto-CJK-NOTICE.txt \
+              --output "$destination"
+          done
+
+      - name: Reject nondeterministic outputs
+        run: diff -qr work/font_build_a work/font_build_b
+
+      - name: Verify six fonts, every glyph, and original atlas preservation
+        env:
+          ZH_TW_FONT_BUILD_DIR: work/font_build_a
+          ZH_TW_FONT_BASELINE_DIR: work/font_dump
+          ZH_TW_FONT_REQUIRED: work/required_zh_tw_glyphs.txt
+          ZH_TW_BASELINE_IWD: patches/main/localized_chinese_iw15.iwd
+        run: python -m unittest tests/test_zh_tw_font_builder.py -v
+
+      - name: Audit generated glyph coverage
+        shell: bash
+        run: |
+          set -o pipefail
+          python tools/zh_tw_font_audit.py \
+            --fonts work/font_build_a \
+            --required work/required_zh_tw_glyphs.txt \
+            --json-out work/font-build-audit.json \
+            --md-out work/font-build-audit.md | tee work/font-build-audit.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('work/font-build-audit.json').read_text(encoding='utf-8'))
+          core = [font for font in result['fonts'] if font['core_font']]
+          required = result['required_glyph_codes']
+          assert required == 1288, f'expected checkpoint inventory of 1288, got {required}'
+          assert len(core) == 6, f'expected 6 core fonts, got {len(core)}'
+          for font in core:
+              assert font['covered_count'] == required, font
+              assert font['missing_count'] == 0, font
+              assert font['unusable_count'] == 0, font
+          print(f'generated JSON audit: {len(core)} core fonts, {required}/{required} present, 0 missing')
+          PY
+
+      - name: Verify every required glyph has visible atlas pixels
+        run: |
+          python tools/zh_tw_font_pixels_audit.py \
+            --fonts work/font_build_a \
+            --images work/font_build_a \
+            --required work/required_zh_tw_glyphs.txt \
+            --json-out work/font-build-pixels-audit.json
+
+      - name: Link complete code_post_gfx fastfile and round-trip font assets
+        run: |
+          python tools/zh_tw_font_link.py \
+            --oat-bin "$OAT_BIN" \
+            --original-ff patches/zone/code_post_gfx.ff \
+            --baseline-iwd patches/main/localized_chinese_iw15.iwd \
+            --font-build work/font_build_a \
+            --required work/required_zh_tw_glyphs.txt \
+            --output work/font_link
+
+      - name: Upload generated font assets and audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zh-tw-font-assets-experimental
+          path: |
+            work/font_build_a/**
+            work/font-build-audit.json
+            work/font-build-audit.md
+            work/font-build-audit.txt
+            work/font-build-pixels-audit.json
+            work/font_link/link-result.json
+            work/font_link/roundtrip/fonts/*.json
+            work/font_link/*.log
+            work/required_zh_tw_glyphs.txt
+          if-no-files-found: warn
