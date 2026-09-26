@@ -986,7 +986,30 @@ def main():
         help="补丁资源目录 (默认: 脚本所在目录)"
     )
 
+    parser.add_argument("--locale", choices=("zh-CN", "zh-TW"), default="zh-CN",
+                        help="zh-TW selects the bounded single-player QA installer")
+    parser.add_argument("--qa-assets", type=Path, help="generated local zh-TW QA package")
+    parser.add_argument("--dry-run", action="store_true", help="validate and plan zh-TW QA without installing")
+    parser.add_argument("--plan-out", type=Path, help="save the zh-TW QA install plan outside the game directory")
     args = parser.parse_args()
+    qa_journal = args.game_dir / ".cod4cn_bak" / "qa-install.json"
+    if args.locale == "zh-TW" or (args.command in ("uninstall", "status") and qa_journal.is_file()):
+        if args.command is None:
+            parser.error("zh-TW QA requires install, uninstall, or status")
+        if args.command != "install" and (args.dry_run or args.plan_out):
+            parser.error("--dry-run and --plan-out are only supported for QA install")
+        sys.dont_write_bytecode = True
+        from tools.zh_tw_qa_install import COD4ZHTWQAPatch
+        patcher = COD4ZHTWQAPatch(args.game_dir, args.qa_assets)
+        if args.command == "install":
+            ok = patcher.install_qa(args.dry_run, args.plan_out)
+        elif args.command == "uninstall":
+            ok = patcher.uninstall()
+        else:
+            ok = patcher.status()
+        sys.exit(0 if ok else 1)
+    if args.qa_assets or args.dry_run or args.plan_out:
+        parser.error("QA options require --locale zh-TW")
     patcher = COD4CNPatch(game_dir=args.game_dir, patch_dir=args.patch_dir)
 
     # ── 防呆：检查是否在正确的游戏目录 ───────────────

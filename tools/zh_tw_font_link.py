@@ -85,9 +85,9 @@ def verify_inputs(args: argparse.Namespace) -> dict:
     ensure(digest(args.original_ff) == ORIGINAL_FF_SHA256,
            "original FF does not match pinned SHA-256")
     manifest = load_json(args.font_build / "font-build-manifest.json")
-    ensure(manifest.get("schema") == 1 and manifest.get("required_count") == REQUIRED_COUNT,
+    ensure(manifest.get("schema") == 1 and manifest.get("required_count") == args.expected_required,
            "font-build manifest schema or required count differs from checkpoint")
-    ensure(manifest.get("output_glyph_count_per_font") == GLYPHS_PER_FONT,
+    ensure(manifest.get("output_glyph_count_per_font") == args.expected_glyphs_per_font,
            "font-build manifest glyph count differs from checkpoint")
     ensure(manifest.get("baseline_iwd_sha256") == BASELINE_IWD_SHA256,
            "font-build baseline IWD SHA does not match pinned baseline")
@@ -102,22 +102,22 @@ def verify_inputs(args: argparse.Namespace) -> dict:
         ensure(source.is_file(), f"font-build output missing: {source}")
         ensure(digest(source) == output_hashes[relative], f"font-build hash mismatch: {relative}")
     characters = sorted(set(args.required.read_text(encoding="utf-8-sig").strip()))
-    ensure(len(characters) == REQUIRED_COUNT, "required glyph count differs from checkpoint")
+    ensure(len(characters) == args.expected_required, "required glyph count differs from checkpoint")
     codes = [int.from_bytes(char.encode("gbk"), "big") for char in characters]
-    ensure(all(code > 0xFF for code in codes) and len(set(codes)) == REQUIRED_COUNT,
+    ensure(all(code > 0xFF for code in codes) and len(set(codes)) == args.expected_required,
            "required Unicode to GBK mapping is not one-to-one double-byte")
     manifest_mapping = {int(item["gbk_code"], 16): item["char"]
                         for item in manifest.get("glyph_mapping", [])}
     ensure(manifest_mapping == dict(zip(codes, characters)),
            "required glyph mapping differs from font-build manifest")
-    pixels = inspect_pixels(args.font_build, args.font_build, args.required)
-    ensure(pixels["pass"] and all(item["drawable"] == REQUIRED_COUNT
+    pixels = inspect_pixels(args.font_build, args.font_build, args.required, args.expected_required)
+    ensure(pixels["pass"] and all(item["drawable"] == args.expected_required
                                   for item in pixels["fonts"].values()),
            "font-build pixels are not fully drawable")
     return {"manifest": manifest, "prelink_pixels": pixels}
 
 
-def stage_assets(source_dump: Path, font_build: Path, stage: Path) -> int:
+def stage_assets(source_dump: Path, font_build: Path, stage: Path, localize_str: Path | None = None) -> int:
     zone_source = source_dump / "zone_source" / "code_post_gfx.zone"
     localized = source_dump / "english" / "localizedstrings" / "code_post_gfx.str"
     ensure(zone_source.is_file() and localized.is_file(),
@@ -134,8 +134,18 @@ def stage_assets(source_dump: Path, font_build: Path, stage: Path) -> int:
     entries = [line for line in zone_text.splitlines()
                if line and not line.lstrip().startswith("//") and not line.startswith(">")]
     ensure(len(entries) > 100, f"original zone source appears truncated: {len(entries)} entries")
+    if localize_str is not None:
+        from zh_tw_text_build import parse_str, tokens, check_hazards
+        original_entries = parse_str(localized.read_bytes())
+        converted_entries = parse_str(localize_str.read_bytes())
+        ensure([e.key for e in original_entries] == [e.key for e in converted_entries],
+               "localize override changes keys or their order")
+        for original, converted in zip(original_entries, converted_entries):
+            ensure(tokens(original.text) == tokens(converted.text),
+                   f"localize override changes control tokens: {original.key}")
+            check_hazards(converted.text)
     copies = [(zone_source, stage / "zone_source" / zone_source.name),
-              (localized, stage / "english" / "localizedstrings" / localized.name)]
+              (localize_str or localized, stage / "english" / "localizedstrings" / localized.name)]
     for name in CORE_FONTS:
         copies.append((font_build / "fonts" / f"{name}.json", stage / "fonts" / f"{name}.json"))
     for name in MATERIAL_NAMES:
@@ -169,7 +179,7 @@ def verify_link_log(log: str) -> None:
     ensure('Created zone "code_post_gfx"' in log, "Linker did not create requested zone")
 
 
-def verify_roundtrip(font_build: Path, dumped: Path) -> dict:
+def verify_roundtrip(font_build: Path, dumped: Path, expected_glyphs: int = GLYPHS_PER_FONT) -> dict:
     counts = {}
     for name in CORE_FONTS:
         expected = load_json(font_build / "fonts" / f"{name}.json")
@@ -186,7 +196,7 @@ def verify_roundtrip(font_build: Path, dumped: Path) -> dict:
                 result[code] = glyph
             return result
         before, after = indexed(expected), indexed(actual)
-        ensure(len(before) == GLYPHS_PER_FONT and before.keys() == after.keys(),
+        ensure(len(before) == expected_glyphs and before.keys() == after.keys(),
                f"font {name} lost or gained glyph codes in roundtrip")
         for code, glyph in before.items():
             rebuilt = after[code]
@@ -296,6 +306,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline-iwd", type=Path, required=True)
     parser.add_argument("--font-build", type=Path, required=True)
     parser.add_argument("--required", type=Path, required=True)
+    parser.add_argument("--expected-required", type=int, default=REQUIRED_COUNT)
+    parser.add_argument("--expected-glyphs-per-font", type=int, default=GLYPHS_PER_FONT)
+    parser.add_argument("--localize-str", type=Path,
+                        help="converted GBK OAT STR; keys/tokens and linked values are verified")
     parser.add_argument("--repo-notice", type=Path,
                         help="repository NOTICE to copy into QA package when available")
     parser.add_argument("--output", type=Path, required=True,
@@ -303,6 +317,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     for key in ("oat_bin", "original_ff", "baseline_iwd", "font_build", "required", "output"):
         setattr(args, key, getattr(args, key).resolve())
+    if args.localize_str is not None:
+        args.localize_str = args.localize_str.resolve()
     if args.repo_notice is not None:
         args.repo_notice = args.repo_notice.resolve()
     else:
@@ -321,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
                            str(source_dump), str(args.original_ff)],
                 args.output / "unlink-source.log")
         stage = args.output / "stage"
-        zone_entries = stage_assets(source_dump, args.font_build, stage)
+        zone_entries = stage_assets(source_dump, args.font_build, stage, args.localize_str)
         linked_dir = args.output / "linked"
         linked_dir.mkdir()
         link_log = run_oat(linker, ["--load", str(args.original_ff), "--base-folder",
@@ -337,17 +353,27 @@ def main(argv: list[str] | None = None) -> int:
         shutil.copyfile(linked_ff, final_ff)
         roundtrip = args.output / "roundtrip"
         roundtrip.mkdir()
-        dump_log = run_oat(unlinker, ["--include-assets", "font", "--output-folder",
+        dump_log = run_oat(unlinker, ["--include-assets", "font,localize", "--output-folder",
                                        str(roundtrip), str(final_ff)],
                            args.output / "unlink-roundtrip.log")
         for name in CORE_FONTS:
             ensure(f'Dumped font "fonts/{name}"' in dump_log,
                    f"Unlinker did not report rebuilt font {name}")
-        font_counts = verify_roundtrip(args.font_build, roundtrip)
-        pixels = inspect_pixels(roundtrip, args.font_build, args.required)
-        ensure(pixels["pass"] and all(item["drawable"] == REQUIRED_COUNT
+        font_counts = verify_roundtrip(args.font_build, roundtrip, args.expected_glyphs_per_font)
+        pixels = inspect_pixels(roundtrip, args.font_build, args.required, args.expected_required)
+        ensure(pixels["pass"] and all(item["drawable"] == args.expected_required
                                       for item in pixels["fonts"].values()),
                "roundtrip glyphs do not point to drawable atlas pixels")
+        localize_report = None
+        if args.localize_str is not None:
+            from zh_tw_text_build import parse_str
+            desired = {e.key: e.text for e in parse_str(args.localize_str.read_bytes())}
+            actual_path = roundtrip / "english/localizedstrings/code_post_gfx.str"
+            actual = {e.key: e.text for e in parse_str(actual_path.read_bytes())}
+            ensure(desired == actual, "linked LocalizeEntry keys or values changed in roundtrip")
+            localize_report = {"keys": len(actual), "all_values_equal": True,
+                               "source_str_sha256": digest(args.localize_str),
+                               "roundtrip_str_sha256": digest(actual_path)}
         image_roundtrip = verify_image_roundtrip(
             unlinker, final_ff, stage, args.font_build, args.output / "roundtrip-images")
         iwd = repack_iwd(args.baseline_iwd, args.font_build,
@@ -361,7 +387,8 @@ def main(argv: list[str] | None = None) -> int:
             "font_build_manifest_sha256": digest(args.font_build / "font-build-manifest.json"),
             "original_zone_entries": zone_entries,
             "font_glyph_counts": font_counts,
-            "required": REQUIRED_COUNT,
+            "required": args.expected_required,
+            "localize_roundtrip": localize_report,
             "roundtrip_pixels": pixels,
             "roundtrip_images": image_roundtrip,
             "linked_ff": {"path": str(final_ff), "size": final_ff.stat().st_size,
@@ -375,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
                           encoding="utf-8")
         print(f"FF: {final_ff} ({result['linked_ff']['sha256']})")
         print(f"QA IWD: {iwd['path']} ({iwd['sha256']})")
-        print(f"Roundtrip: {len(font_counts)} fonts, {REQUIRED_COUNT}/{REQUIRED_COUNT} drawable per font")
+        print(f"Roundtrip: {len(font_counts)} fonts, {args.expected_required}/{args.expected_required} drawable per font")
         print(f"Result: {report}")
         return 0
     except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:

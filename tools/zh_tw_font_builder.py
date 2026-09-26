@@ -235,7 +235,8 @@ def dump_json(path: Path, obj: object) -> None:
 
 
 def build(font_path: Path, font_data: bytes, mapping: list[dict], baseline_root: Path,
-          baseline_iwd: Path, license_file: Path, notice_file: Path, output: Path) -> dict:
+          baseline_iwd: Path, license_file: Path, notice_file: Path, output: Path,
+          expected_required: int = 1288, expected_added: int = 498) -> dict:
     from PIL import __version__ as pillow_version
     from PIL import Image, features
 
@@ -256,7 +257,7 @@ def build(font_path: Path, font_data: bytes, mapping: list[dict], baseline_root:
         raise ValueError("the baseline font assets do not have an identical code set")
     old_codes = next(iter(old_codes_by_name.values()))
     missing = [item for item in mapping if int(item["gbk_code"], 16) not in old_codes]
-    if len(mapping) != 1288 or len(missing) != 498:
+    if len(mapping) != expected_required or len(missing) != expected_added:
         raise ValueError(f"unexpected glyph checkpoint: required={len(mapping)} missing={len(missing)}")
     groups: dict[str, list[str]] = {}
     for name, obj in baseline.items():
@@ -360,6 +361,8 @@ def main(argv=None) -> int:
     parser.add_argument("--license-file", type=Path)
     parser.add_argument("--notice-file", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--expected-required", type=int, default=1288)
+    parser.add_argument("--expected-added", type=int, default=498)
     args = parser.parse_args(argv)
     data = load_pinned_font(args.font, args.expected_font_sha256)
     mapping = required_mapping(args.required, unicode_cmap_groups(data))
@@ -369,7 +372,8 @@ def main(argv=None) -> int:
         if not all((args.baseline_fonts, args.baseline_iwd, args.license_file, args.notice_file, args.output)):
             parser.error("build requires --baseline-fonts, --baseline-iwd, --license-file, --notice-file and --output")
         result = build(args.font, data, mapping, args.baseline_fonts, args.baseline_iwd,
-                       args.license_file, args.notice_file, args.output)
+                       args.license_file, args.notice_file, args.output,
+                       args.expected_required, args.expected_added)
         print(f"produced files: {len(result['outputs_sha256'])}")
         print(f"output: {args.output}")
     return 0

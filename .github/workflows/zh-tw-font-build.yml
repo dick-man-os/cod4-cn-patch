@@ -158,13 +158,15 @@ jobs:
             --required work/required_zh_tw_glyphs.txt \
             --output work/font_link
 
-      - name: Upload generated font assets and audit
+      - name: Upload text reports only (no game-ready binaries)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zh-tw-font-assets-experimental
+          name: zh-tw-font-audit-reports
           path: |
-            work/font_build_a/**
+            work/font_build_a/font-build-manifest.json
+            work/font_build_a/fonts/*.json
+            work/font_build_a/licenses/*.txt
             work/font-build-audit.json
             work/font-build-audit.md
             work/font-build-audit.txt

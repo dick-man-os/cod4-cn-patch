@@ -1,0 +1,86 @@
+name: zh-TW integrated single-player QA
+
+on:
+  push:
+    branches: [zh-tw]
+    paths:
+      - '.github/workflows/zh-tw-qa.yml'
+      - 'cod4_cn_patch.py'
+      - 'tools/zh_tw_*'
+      - 'tests/test_zh_tw_*'
+      - 'requirements-zh-tw*'
+      - 'locales/zh-TW/**'
+      - 'licenses/**'
+      - 'docs/zh-tw-qa.md'
+      - 'patches/**'
+      - 'NOTICE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integrated-qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned build dependencies
+        run: python -m pip install -r requirements-zh-tw-qa.txt
+      - name: Text and reversible installer tests
+        run: python -m unittest discover -s tests -v
+      - name: Download pinned font and OAT
+        run: |
+          mkdir -p work/oat
+          curl --fail --location --retry 3 -o work/NotoSansCJKtc-Regular.otf \
+            https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf
+          echo 'dce08bd4fd91aa8aa76ed8fea4b694c2dfb8550f67871e326843212ddbeb88b4  work/NotoSansCJKtc-Regular.otf' | sha256sum -c -
+          curl --fail --location --retry 3 -o work/oat-linux.tar.gz \
+            https://github.com/Laupetin/OpenAssetTools/releases/download/v0.33.0/oat-linux.tar.gz
+          echo 'aa0b80f633c50d656b26d28b4899fd76bd994024ff0c669303ed5db52cc9e864  work/oat-linux.tar.gz' | sha256sum -c -
+          tar -xzf work/oat-linux.tar.gz -C work/oat
+          LINKER="$(find work/oat -type f -name Linker | head -n 1)"
+          test -n "$LINKER"
+          OAT_BIN="$(dirname "$LINKER")"
+          test -f "$OAT_BIN/Unlinker"
+          chmod +x "$OAT_BIN/Linker" "$OAT_BIN/Unlinker"
+          echo "OAT_BIN=$OAT_BIN" >> "$GITHUB_ENV"
+      - name: Build integrated QA twice with full font/text/image roundtrip
+        run: |
+          for suffix in a b; do
+            python tools/zh_tw_qa_build.py \
+              --oat-bin "$OAT_BIN" --font work/NotoSansCJKtc-Regular.otf \
+              --work "work/build_$suffix" --output "work/qa_$suffix"
+          done
+      - name: Require byte-identical packages and ZIPs
+        run: |
+          diff -qr work/qa_a work/qa_b
+          cmp work/qa_a.zip work/qa_b.zip
+          sha256sum work/qa_a.zip > work/QA-ZIP-SHA256.txt
+          git diff --exit-code -- patches/ NOTICE
+      - name: Independently verify integrated glyph metrics and pixels
+        env:
+          ZH_TW_FONT_BUILD_DIR: work/build_a/font
+          ZH_TW_FONT_BASELINE_DIR: work/build_a/source
+          ZH_TW_FONT_REQUIRED: work/build_a/text/required_zh_tw_glyphs.txt
+          ZH_TW_BASELINE_IWD: patches/main/localized_chinese_iw15.iwd
+          ZH_TW_EXPECTED_REQUIRED: '1518'
+          ZH_TW_EXPECTED_ADDED: '596'
+          ZH_TW_QA_PACKAGE: work/qa_a
+        run: python -m unittest discover -s tests -v
+      - name: Upload reports, hashes and text only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zh-tw-singleplayer-qa-reports
+          path: |
+            work/qa_a/manifests/**
+            work/qa_a/README-QA.md
+            work/qa_a/SHA256SUMS
+            work/QA-ZIP-SHA256.txt
+            work/build_a/*.log
+            work/build_a/link/*.log
+            work/build_a/link/link-result.json
+          if-no-files-found: warn

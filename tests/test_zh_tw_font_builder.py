@@ -139,6 +139,8 @@ class MappingTests(unittest.TestCase):
 class BuiltFontTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.expected_required = int(os.environ.get("ZH_TW_EXPECTED_REQUIRED", "1288"))
+        cls.expected_added = int(os.environ.get("ZH_TW_EXPECTED_ADDED", "498"))
         cls.build = Path(os.environ["ZH_TW_FONT_BUILD_DIR"])
         cls.baseline = Path(os.environ["ZH_TW_FONT_BASELINE_DIR"])
         cls.original_iwd = Path(os.environ["ZH_TW_BASELINE_IWD"])
@@ -154,14 +156,14 @@ class BuiltFontTests(unittest.TestCase):
             cls.material_images[material] = cls.build / "images" / (material.split("/")[-1] + ".iwi")
 
     def test_cmap_manifest_and_licenses(self):
-        self.assertEqual(len(self.required), 1288)
+        self.assertEqual(len(self.required), self.expected_required)
         manifest = read_json(self.build / "font-build-manifest.json")
         self.assertEqual(manifest["font_sha256"], EXPECTED_FONT_SHA256)
         self.assertEqual(manifest["baseline_iwd_sha256"], EXPECTED_IWD_SHA256)
         self.assertEqual(manifest["required_count"], len(self.required))
-        self.assertEqual(manifest["added_glyph_count_per_font"], 498)
+        self.assertEqual(manifest["added_glyph_count_per_font"], self.expected_added)
         self.assertEqual(manifest["original_glyph_count_per_font"], 1742)
-        self.assertEqual(manifest["output_glyph_count_per_font"], 2240)
+        self.assertEqual(manifest["output_glyph_count_per_font"], 1742 + self.expected_added)
         by_char = {item["char"]: item for item in manifest["glyph_mapping"]}
         for char in self.required:
             item = by_char[char]
@@ -194,7 +196,7 @@ class BuiltFontTests(unittest.TestCase):
             original = self.original_fonts[name]
             old_codes = {glyph_code(g["letter"]) for g in original["glyphs"]}
             added = self.required_codes - old_codes
-            self.assertEqual(len(added), 498, name)
+            self.assertEqual(len(added), self.expected_added, name)
             typical, _ = Counter(
                 tuple(g[field] for field in metrics)
                 for g in original["glyphs"] if glyph_code(g["letter"]) > 0xFF

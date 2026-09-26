@@ -26,10 +26,10 @@ def read_rgba_iwi(path: Path) -> tuple[int, int, bytes]:
     return width, height, rgba[3::4]
 
 
-def inspect(fonts: Path, images: Path, required: Path) -> dict:
+def inspect(fonts: Path, images: Path, required: Path, expected_required: int = 1288) -> dict:
     chars = sorted(set(required.read_text(encoding="utf-8-sig").strip()))
     codes = {int.from_bytes(ch.encode("gbk"), "big"): ch for ch in chars}
-    if len(chars) != 1288 or len(codes) != 1288:
+    if len(chars) != expected_required or len(codes) != expected_required:
         raise ValueError(f"required character checkpoint changed: {len(chars)}")
     report = {"required": len(codes), "fonts": {}}
     cache = {}
@@ -74,8 +74,9 @@ def main(argv=None) -> int:
     parser.add_argument("--images", type=Path, required=True)
     parser.add_argument("--required", type=Path, required=True)
     parser.add_argument("--json-out", type=Path, required=True)
+    parser.add_argument("--expected-required", type=int, default=1288)
     args = parser.parse_args(argv)
-    report = inspect(args.fonts, args.images, args.required)
+    report = inspect(args.fonts, args.images, args.required, args.expected_required)
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
     args.json_out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     for name, result in report["fonts"].items():
