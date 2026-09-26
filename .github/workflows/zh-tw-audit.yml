@@ -237,6 +237,13 @@ jobs:
           print("\n".join(lines[:12]))
           PY
 
+      - name: Probe Chinese font resources
+        run: |
+          python tools/font_mapping_probe.py \
+            --iwd patches/main/localized_chinese_iw15.iwd \
+            --ff patches/zone/code_post_gfx.ff \
+            --out work/font-probe.json
+
       - name: Upload audit artifact
         uses: actions/upload-artifact@v4
         with:
@@ -246,6 +253,7 @@ jobs:
             work/required_zh_tw_glyphs.txt
             work/audit-summary.md
             work/scan.txt
+            work/font-probe.json
             work/font-coverage.json
             work/font-coverage.md
             work/font-unlinker.log
